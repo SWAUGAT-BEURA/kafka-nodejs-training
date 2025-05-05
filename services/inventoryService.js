@@ -1,39 +1,41 @@
-// services/inventoryService.js
-const Inventory = require('../models/inventory.model');
+const Inventory = require('../models/inventory');
 const { sendToDeadLetterQueue } = require('../utils/deadLetter');
 
 const updateInventory = async (productId, quantity, isAbsolute = false) => {
-  const inventory = await Inventory.findOne({ productId });
-
+  let inventory = await Inventory.findOne({ productId });
+  console.log(inventory)
   if (!inventory) {
     console.warn(`⚠️ Product ${productId} not found.`);
     await sendToDeadLetterQueue('ProductNotFound', { productId, quantity });
     return false;
   }
 
-  if (!isAbsolute) {
-    // Order placed or cancelled
-    if (quantity < 0 && inventory.stock < Math.abs(quantity)) {
-      console.warn(`⛔ Out of stock: ${productId}. Available: ${inventory.stock}, Requested: ${Math.abs(quantity)}`);
-      await sendToDeadLetterQueue('OutOfStock', { productId, quantity });
+  if (isAbsolute) {
+    console.log(1)
+    // Set inventory to a fixed quantity
+    inventory.quantity = quantity;
+  } else {
+    console.log(2)
+    const newStock = inventory.quantity + quantity;
+    // Prevent negative stock
+    if (newStock < 0) {
+      console.warn(`⛔ Cannot update inventory for ${productId}. Current stock: ${inventory.quantity}, Requested change: ${quantity}`);
+      await sendToDeadLetterQueue('123OutOfStock', { productId, quantity, currentStock: inventory.quantity });
       return false;
     }
-
-    inventory.stock += quantity;
-  } else {
-    // Absolute stock update (e.g. inventory sync)
-    inventory.stock = quantity;
+    inventory.quantity = newStock;
   }
 
   await inventory.save();
-  console.log(`📦 ${productId} stock updated: ${inventory.stock}`);
+  console.log(`📦 Updated inventory for ${productId}: ${inventory.quantity}`);
   return true;
 };
 
 const getInventory = async (productId) => {
-    const product = await Inventory.findOne({ productId });
-    if (!product) return 0;  // If product is not found, assume 0 stock
-    return product.stock;  // Assuming 'stock' field holds the inventory count
-  };
+  console.log("Looking up inventory for productId:", productId, typeof productId);
+  const product = await Inventory.findOne({ productId });
+  console.log(product)
+  return product ? product.quantity : 0;
+};
 
-module.exports = { updateInventory,getInventory };
+module.exports = { updateInventory, getInventory };
